@@ -376,6 +376,25 @@ body.explain-only-mode .verse-num {
 .continue-landing{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;margin:0 0 18px;background:#fff5e5;border:1px solid #e7d3b4;border-radius:16px}.continue-landing small,.continue-landing b{display:block}.continue-landing small{font:12px system-ui;color:#796a5b}.continue-landing b{margin-top:3px}.continue-landing button{border:0;background:#8b4d25;color:#fff;border-radius:12px;padding:10px 13px;font-weight:700}
 @media(max-width:700px){.header-inner{gap:6px}.secondary-reader-btn{font-size:0!important;width:42px;height:42px;padding:0!important}.secondary-reader-btn:first-letter{font-size:18px}.listen-btn .label{font-size:12px}.library-card{max-height:84vh}.continue-landing{align-items:flex-start;flex-direction:column}.continue-landing button{width:100%}}
 
+
+/* ===== Mobile reader v2 fixes ===== */
+@media (max-width: 900px){
+  .audio-panel{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:1000;padding:0;max-width:none;pointer-events:none}
+  .audio-panel[hidden]{display:none!important}
+  .audio-panel-inner{pointer-events:auto;background:rgba(255,253,248,.98);backdrop-filter:blur(12px);border:1px solid var(--line);box-shadow:0 8px 28px rgba(0,0,0,.18);border-radius:16px;padding:7px 8px;display:flex;align-items:center;gap:6px;min-height:54px;max-height:58px;overflow:hidden}
+  .audio-panel .transport{gap:5px;flex:0 0 auto}
+  .audio-panel .transport button{min-width:42px;width:42px;height:42px;min-height:42px;padding:0;border-radius:12px}
+  .audio-panel .settings-toggle{display:flex;min-width:42px;width:42px;height:42px;min-height:42px;padding:0;align-items:center;justify-content:center}
+  .audio-panel .now-reading-compact{display:block!important;flex:1 1 auto;min-width:0;font-size:.78rem;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
+  .audio-panel .panel-settings{display:none!important;position:absolute;left:0;right:0;bottom:64px;background:var(--stone);border:1px solid var(--line);border-radius:16px;padding:12px;box-shadow:0 8px 28px rgba(0,0,0,.18);flex-direction:column;align-items:stretch;gap:10px;max-height:55vh;overflow:auto}
+  .audio-panel .panel-settings.expanded{display:flex!important}
+  .audio-panel .panel-settings select{width:100%;min-height:44px;font-size:1rem}
+  body{padding-bottom:78px}
+}
+@media (min-width:901px){
+  .audio-panel .settings-toggle{display:none}
+}
+.reader-ai-error{color:#9b2c20;font-size:.8rem;margin-top:4px}
 </style>
 </head>
 <body>
@@ -16122,9 +16141,11 @@ body.explain-only-mode .verse-num {
   overlay.innerHTML=`<div class="library-card"><div class="library-head"><strong>📚 आपकी पढ़ने की जगह</strong><button id="closeLibrary">✕</button></div><div id="continueBox"></div><div class="library-section"><h3>🔖 Bookmarks</h3><div id="bookmarkList"></div></div></div>`;
   document.body.appendChild(overlay);
 
-  const status=document.createElement("div"); status.id="ttsStatus"; status.setAttribute("aria-live","polite"); status.textContent="AI voice तैयार है — पहली बार Read Aloud दबाने पर मॉडल डाउनलोड होगा।";
+  const status=document.createElement("div"); status.id="ttsStatus"; status.setAttribute("aria-live","polite"); status.textContent='';
   if(panel) panel.querySelector(".audio-panel-inner")?.appendChild(status);
+  status.style.cssText='font:11px/1.25 var(--font-sans,Arial,sans-serif);position:absolute;left:10px;right:10px;bottom:62px;padding:6px 8px;background:rgba(255,253,248,.97);border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:2;display:none;';
 
+  const statusObserver=new MutationObserver(()=>{status.style.display=(status.textContent&&status.textContent!=='')?'block':'none'}); statusObserver.observe(status,{childList:true,characterData:true,subtree:true});
   function save(){ localStorage.setItem(STORAGE, JSON.stringify(state)); }
   function getActiveView(){ return document.querySelector(".view:not([hidden])"); }
   function getActiveContainer(){ const v=getActiveView(); return v?.querySelector(".readable-content") || null; }
@@ -16211,6 +16232,10 @@ body.explain-only-mode .verse-num {
   const speakerLabels={devotional:'AI — devotional',male:'AI — calm male',female:'AI — calm female',sanskrit:'AI — Sanskrit reading'};
   if(voiceSelect){voiceSelect.innerHTML=Object.entries(speakerLabels).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');voiceSelect.value=state.settings.speaker||'devotional';}
   if(rateSelect) rateSelect.value=String(state.settings.rate||0.95);
+  const phoneBtn=document.createElement('button');
+  phoneBtn.type='button'; phoneBtn.textContent='📱 Phone Voice (fallback)'; phoneBtn.style.cssText='min-height:44px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 12px;font-weight:600;';
+  phoneBtn.addEventListener('click',()=>{document.getElementById('panelSettings')?.classList.remove('expanded');phoneVoiceCurrent();});
+  document.getElementById('panelSettings')?.appendChild(phoneBtn);
   voiceSelect?.addEventListener('change',()=>{state.settings.speaker=voiceSelect.value;save();});
   rateSelect?.addEventListener('change',()=>{state.settings.rate=parseFloat(rateSelect.value);save();});
 
@@ -16218,16 +16243,21 @@ body.explain-only-mode .verse-num {
     if(pipe)return pipe;
     if(loading)return loading;
     loading=(async()=>{
-      status.textContent='⏳ AI voice model लोड हो रहा है… पहली बार बड़ा download होगा।';
+      status.textContent='⏳ असली AI voice model लोड हो रहा है… पहली बार बड़ा download होगा।';
       try{
-        const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2');
-        // q4f16 is the mobile-oriented quantized variant published with this model.
+        const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0');
+        if(!('gpu' in navigator) || !navigator.gpu){
+          throw new Error('WebGPU is not available in this browser');
+        }
+        // The current ONNX release documents q4f16 as its browser-oriented variant.
         pipe=await mod.pipeline('text-to-audio',MODEL_ID,{dtype:'q4f16',device:'webgpu'});
-        status.textContent='✅ AI voice तैयार है।';
+        status.textContent='✅ AI neural voice तैयार है।';
         return pipe;
       }catch(err){
-        console.error(err); status.textContent='⚠️ AI voice इस device/browser पर load नहीं हुई — free browser voice fallback उपलब्ध है।';
-        pipe=null; throw err;
+        console.error('Indic Parler load failed:',err);
+        pipe=null;
+        status.textContent='❌ AI voice load नहीं हुई। नीचे Phone Voice इस्तेमाल करने का विकल्प है।';
+        throw err;
       }finally{loading=null;}
     })();
     return loading;
@@ -16252,8 +16282,8 @@ body.explain-only-mode .verse-num {
   async function generateAI(text){
     const p=await loadAI();
     const desc=speakers[state.settings.speaker]||speakers.devotional;
-    // The browser pipeline accepts the text prompt; the model's multilingual tokenizer detects Hindi/Sanskrit.
-    const result=await p(text,{description:desc,do_sample:false});
+    const result=await p(text,{description:desc,do_sample:false,max_new_tokens:220});
+    if(!result || !result.audio) throw new Error('Neural TTS returned no waveform');
     return URL.createObjectURL(audioBlobFromResult(result));
   }
   function stopAudio(){if(currentAudio){currentAudio.onended=null;currentAudio.onerror=null;currentAudio.pause();currentAudio.src='';currentAudio=null;}if(native)native.cancel();}
@@ -16264,20 +16294,39 @@ body.explain-only-mode .verse-num {
   async function speakCurrent(){
     if(!speaking||qIndex>=queue.length){stopReading();return;}
     const item=queue[qIndex]; highlight(item.node); saveProgress(item.node);
-    const head=item.node.closest('section')?.querySelector('h2,h3');const label=head?`पढ़ा जा रहा है: ${head.textContent}`:'पढ़ा जा रहा है…';if(nowReading)nowReading.textContent=label;if(nowReadingCompact)nowReadingCompact.textContent=label;
-    const parts=chunkText(item.text); let pi=0;
-    async function nextPart(){
+    const head=item.node.closest('section')?.querySelector('h2,h3');
+    const label=head?`पढ़ा जा रहा है: ${head.textContent}`:'पढ़ा जा रहा है…';
+    if(nowReading)nowReading.textContent=label;if(nowReadingCompact)nowReadingCompact.textContent=label;
+    const parts=chunkText(item.text,560);
+    let partIndex=0;
+    async function playNextPart(){
       if(!speaking)return;
-      if(pi>=parts.length){qIndex++;speakCurrent();return;}
+      if(partIndex>=parts.length){ qIndex++; await speakCurrent(); return; }
+      const part=parts[partIndex];
       try{
-        const url=await generateAI(parts[pi++]);if(!speaking)return;
-        currentAudio=new Audio(url);currentAudio.playbackRate=1;currentAudio.onended=()=>{URL.revokeObjectURL(url);currentAudio=null;nextPart()};currentAudio.onerror=()=>{URL.revokeObjectURL(url);currentAudio=null;fallback(parts[pi-1])};
-        if(paused){currentAudio.pause()} else await currentAudio.play();
-      }catch(err){console.warn('Indic AI TTS failed',err);status.textContent='⚠️ AI voice load/generation failed; free browser voice used for this passage.';fallback(item.text);}
+        const url=await generateAI(part);
+        if(!speaking){URL.revokeObjectURL(url);return;}
+        currentAudio=new Audio(url); currentAudio.playbackRate=1;
+        currentAudio.onended=async()=>{URL.revokeObjectURL(url);currentAudio=null;partIndex++;await playNextPart()};
+        currentAudio.onerror=()=>{URL.revokeObjectURL(url);currentAudio=null;status.textContent='❌ AI audio playback failed. Reading stopped; no robotic fallback was used.';stopReading()};
+        if(paused){currentAudio.pause()}else{await currentAudio.play()}
+      }catch(err){
+        console.warn('Indic Parler generation failed',err);
+        status.textContent='❌ AI voice generation failed. Reading stopped; no robotic fallback was used.';
+        stopReading();
+      }
     }
-    nextPart();
+    await playNextPart();
   }
-  function fallback(text){if(!native){toast('इस browser में free speech उपलब्ध नहीं है।');stopReading();return;}native.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=/[\u0900-\u097F]/.test(text)?'hi-IN':'en-IN';u.rate=state.settings.rate||0.95;u.pitch=1;u.onend=()=>{if(speaking){qIndex++;speakCurrent()}};u.onerror=()=>{if(speaking){qIndex++;speakCurrent()}};native.speak(u);}
+
+  function phoneVoiceCurrent(){
+    if(!native){toast('इस browser में phone voice उपलब्ध नहीं है।');return;}
+    if(!speaking){const c=getActiveContainer();if(c){buildQueue(c,0);speaking=true;qIndex=0}}
+    native.cancel(); const item=queue[qIndex]; if(!item){stopReading();return}
+    highlight(item.node); saveProgress(item.node);
+    const u=new SpeechSynthesisUtterance(item.text);u.lang=/[\u0900-\u097F]/.test(item.text)?'hi-IN':'en-IN';u.rate=state.settings.rate||0.95;u.pitch=1;
+    u.onend=()=>{if(speaking){qIndex++;phoneVoiceCurrent()}};u.onerror=()=>stopReading();native.speak(u);updateButtons();
+  }
   function startReading(container,start=0){if(!container)return;stopAudio();buildQueue(container,start);speaking=true;paused=false;updateButtons();speakCurrent();}
   function stopReading(){speaking=false;paused=false;stopAudio();clearHighlight();if(nowReading)nowReading.textContent='';if(nowReadingCompact)nowReadingCompact.textContent='';updateButtons();}
   function togglePause(){if(!speaking)return;paused=!paused;if(currentAudio){if(paused)currentAudio.pause();else currentAudio.play().catch(()=>{})}else if(native){paused?native.pause():native.resume()}updateButtons();}
@@ -16285,6 +16334,9 @@ body.explain-only-mode .verse-num {
 
   listenBtn?.addEventListener('click',()=>{if(speaking)stopReading();else startReading(getActiveContainer(),0);});
   playPause?.addEventListener('click',togglePause);stopBtn?.addEventListener('click',stopReading);
+  const settingsToggleBtn=document.getElementById('settingsToggleBtn');
+  settingsToggleBtn?.addEventListener('click',()=>{const ps=document.getElementById('panelSettings');const open=ps?.classList.toggle('expanded');settingsToggleBtn.setAttribute('aria-expanded',String(!!open));});
+  status?.addEventListener('click',()=>{});
   document.addEventListener('keydown',e=>{if(e.target.matches('input,select,textarea'))return;if(e.key===' '&&speaking){e.preventDefault();togglePause()}});
 
   // Tap a paragraph to start reading from there; long-press/click bookmark button saves it.
