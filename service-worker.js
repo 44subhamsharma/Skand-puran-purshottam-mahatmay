@@ -1,0 +1,5 @@
+const CACHE_NAME = "skanda-audiobook-v3";
+const ASSETS = ["./index.html","./manifest.json","./icon-192.png","./icon-512.png","./icon-512-maskable.png","./apple-touch-icon.png"];
+self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(ASSETS)));self.skipWaiting();});
+self.addEventListener("activate",event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim();});
+self.addEventListener("fetch",event=>{if(event.request.method!=="GET")return;const html=event.request.mode==="navigate"||(event.request.headers.get("accept")||"").includes("text/html");if(html){event.respondWith(fetch(event.request).then(r=>{const c=r.clone();caches.open(CACHE_NAME).then(x=>x.put(event.request,c));return r;}).catch(()=>caches.match(event.request)));return;}event.respondWith(caches.match(event.request).then(cached=>cached||fetch(event.request).then(r=>{if(r&&r.status===200&&r.type==='basic'){const c=r.clone();caches.open(CACHE_NAME).then(x=>x.put(event.request,c));}return r;}).catch(()=>cached)));});
